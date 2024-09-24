@@ -718,7 +718,6 @@ function install_image {
     # partition the device.
     # remove spaces and comments
     FDISK_INSTR=$(echo "$FDISK_INSTR" | sed 's/ *#.*//')
-
     if ! echo "$FDISK_INSTR" | fdisk $INSTALL_TGT |& { $VERBOSE && cat || cat > /dev/null; }
     then
         echo "ERROR: failed to format $INSTALL_TGT. Consider manually clearing $INSTALL_TGT's partition table."
@@ -743,7 +742,7 @@ function install_image {
     local INSTALL_P2="${INSTALL_TGT}${PART_PREFIX}2"
     local INSTALL_P3="${INSTALL_TGT}${PART_PREFIX}3"
     mkfs.fat -F32 $INSTALL_P1 &> /dev/null
-    dosfslabel $LOOP_P1 $LFSEFILABEL
+    dosfslabel $INSTALL_P1 $LFSEFILABEL
     
     mkswap $INSTALL_P2 &> /dev/null
     
@@ -759,10 +758,6 @@ function install_image {
     echo "1-----done."
 	
 	$VERBOSE && read -p "Press Enter to continue..."
-	#--------------------------------------------------------------------------------------------------------------
-    # make sure grub.cfg is pointing at the right drive
-    local PARTUUID=$(lsblk -o PARTUUID $INSTALL_TGT | tail -1)
-    sed -Ei "s/root=PARTUUID=[0-9a-z-]+/root=PARTUUID=${PARTUUID}/" $INSTALL_MOUNT/boot/grub/grub.cfg
 
     mount --bind /dev $INSTALL_MOUNT/dev
     mount --bind /dev/pts $INSTALL_MOUNT/dev/pts
@@ -771,26 +766,36 @@ function install_image {
     mount -vt proc proc $INSTALL_MOUNT/proc
 
 	local EFI_PARTITION=$INSTALL_MOUNT/boot
+	mount $LOOP_P1 $LFS/boot/
+	cp -r $LFS/boot/* $EFI_PARTITION
+	echo "2-----done."
+	
+	$VERBOSE && read -p "Press Enter to continue..."
+	mkdir -p $INSTALL_MOUNT/boot/efi
+	local EFI_INSTALL=$INSTALL_MOUNT/boot/efi
 	echo "Mounting EFI partition to $INSTALL_MOUNT/boot/ ..."
-	mount $INSTALL_P1 $EFI_PARTITION
+	mount $INSTALL_P1 $EFI_INSTALL
 	if [ $? -ne 0 ]; then
 		echo "Failed to mount EFI partition. Exiting..."
 		exit 1
 	fi
-	
-	$VERBOSE && read -p "Press Enter to continue..."
-	
-    local GRUB_CMD="grub-install $EFI_PARTITION --target=x86_64-efi --efi-directory=$EFI_PARTITION --bootloader-id=LFS"
+	#--------------------------------------------------------------------------------------------------------------
+    local GRUB_CMD="grub-install --target=x86_64-efi --efi-directory=$EFI_INSTALL --bootloader-id=LFS_PRELOADER"
     local UPDATE_GRUB_CMD="update-grub"
 
     $VERBOSE && echo "Installing GRUB. This may take a few minutes... " || echo -n "Installing GRUB. This may take a few minutes... "
     chroot $INSTALL_MOUNT /usr/bin/bash -c "$GRUB_CMD" |& { $VERBOSE && cat || cat > /dev/null; }
     $VERBOSE && echo "Updating GRUB. This may take a few minutes... " || echo -n "Updating GRUB. This may take a few minutes... "
     chroot $INSTALL_MOUNT /usr/bin/bash -c "$UPDATE_GRUB_CMD" |& { $VERBOSE && cat || cat > /dev/null; }
-	umount $EFI_PARTITION
+	chroot $INSTALL_MOUNT /usr/bin/bash -c "sync" |& { $VERBOSE && cat || cat > /dev/null; }
 	
 	$VERBOSE && read -p "Press Enter to continue..."
+	
 	#---------------------------------------------------------------------------------------------------
+    # make sure grub.cfg is pointing at the right drive
+    local PARTUUID=$(lsblk -o PARTUUID $INSTALL_TGT | tail -1)
+    sed -Ei "s/root=PARTUUID=[0-9a-z-]+/root=PARTUUID=${PARTUUID}/" $INSTALL_MOUNT/boot/grub/grub.cfg
+    
 	# update fstab
 	MOUNT_POINT="/boot/efi"
 	EFI_DEVICE_PARTITION="${INSTALL_TGT}${PART_PREFIX}1"
@@ -799,10 +804,11 @@ function install_image {
 	# command to add new context to the end of /etc/fstab
 	NEW_ENTRY="${EFI_DEVICE_PARTITION}\t$MOUNT_POINT\tvfat\tdefaults\t0\t1"
 	SWAP_ENTRY="${SWAP_DEVICE_PARTITION}\tnone\tswap\tsw\t0\t0"
-	echo -e "$NEW_ENTRY" | sudo tee -a /etc/fstab
-	echo -e "$SWAP_ENTRY" | sudo tee -a /etc/fstab
-
-    echo "2-----done."
+	echo -e "$NEW_ENTRY" | sudo tee -a $INSTALL_MOUNT/etc/fstab
+	echo -e "$SWAP_ENTRY" | sudo tee -a $INSTALL_MOUNT/etc/fstab
+	
+	# umount $EFI_PARTITION
+    echo "3-----done."
     $VERBOSE && read -p "Press Enter to continue..."
 
     set +x

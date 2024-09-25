@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
+
 # #########
 # Functions
 # ~~~~~~~~~
@@ -9,7 +10,7 @@ function usage {
 cat <<EOF
 Welcome to MyLFS.
 
-    WARNING: Most of the functionality in this script requires root privileges,
+    WARNING: Most of the functionality in this script requires root privilages,
 and involves the partitioning, mounting and unmounting of device files. Use at
 your own risk.
 
@@ -46,7 +47,7 @@ on the device you specify.
         -p|--start-phase
         -a|--start-package      Select a phase and optionally a package
                                 within that phase to start building from.
-                                These options are only available if the preceding
+                                These options are only available if the preceeding
                                 phases have been completed. They should really only
                                 be used when something broke during a build, and you
                                 don't want to start from the beginning again.
@@ -71,19 +72,6 @@ on the device you specify.
 
         -h|--help               Show this message.
 EOF
-}
-
-function update_state {
-    echo "$1" > "$STATE_FILE"
-}
-
-function load_state {
-    if [ -f "$STATE_FILE" ]; then
-        CURRENT_PHASE=$(cat "$STATE_FILE")
-    else
-    	echo "${STATE_FILE} not exist."
-        CURRENT_PHASE=""
-    fi
 }
 
 function check_dependency {
@@ -180,7 +168,7 @@ function init_image {
     if [ -f $LFS_IMG ]
     then
         echo "WARNING: $LFS_IMG is present. If you start from the beginning, this file will be deleted."
-        read -p "Continue? (y/N): " CONFIRM
+        read -p "Continue? (Y/N): " CONFIRM
         if [[ $CONFIRM == [yY] || $CONFIRM == [yY][eE][sS] ]]
         then
             echo -n "Cleaning... "
@@ -202,13 +190,12 @@ function init_image {
 
     # attach loop device
     export LOOP=$(losetup -f) # export for grub.sh
-    local LOOP_P1=${LOOP}p1	#EFI
-    local LOOP_P2=${LOOP}p2	#rootfs
+    local LOOP_P1=${LOOP}p1
     losetup $LOOP $LFS_IMG
-	
+
     # partition the device.
     # remove spaces and comments from instructions
-    FDISK_INSTR=$(echo "$FDISK_LOOP_INSTR" | sed 's/ *#.*//')
+    FDISK_INSTR=$(echo "$FDISK_INSTR" | sed 's/ *#.*//')
 
     # fdisk fails to get kernel to re-read the partition table
     # so ignore non-zero exit code, and manually re-read
@@ -222,34 +209,27 @@ function init_image {
     losetup -d $LOOP
 	sleep 1
     losetup -P $LOOP $LFS_IMG
-	
+
     # exporting for grub.cfg
-    export LFSPARTUUID="$(lsblk -o PARTUUID $LOOP_P2 | tail -1)"
+    export LFSPARTUUID="$(lsblk -o PARTUUID $LOOP_P1 | tail -1)"
     while [ -z "$LFSPARTUUID" ]
     do
         # sometimes it takes a few seconds for the PARTUUID to be readable
         sleep 1
-        export LFSPARTUUID="$(lsblk -o PARTUUID $LOOP | tail -1)"
+        export LFSPARTUUID="$(lsblk -o PARTUUID $LOOP_P1 | tail -1)"
     done
 
     # setup root partition
-    mkfs -t $LFS_FS $LOOP_P2 &> /dev/null
+    mkfs -t $LFS_FS $LOOP_P1 &> /dev/null
     mkdir -p $LFS
-    mount -t $LFS_FS $LOOP_P2 $LFS
-	e2label $LOOP_P2 $LFSROOTLABEL
-	
-    # setup EFI partition
-    mkfs.fat -F32 $LOOP_P1
-    mkdir -p $LFS/boot
-    mount $LOOP_P1 $LFS/boot
-    dosfslabel $LOOP_P1 $LFSEFILABEL
-    
+    mount -t $LFS_FS $LOOP_P1 $LFS
+
+    e2label $LOOP_P1 $LFSROOTLABEL
+
     rm -rf $LFS/lost+found
 
     echo "done."
-	$VERBOSE && read -p "Press enter to continue..."
-	#-------------------------------------------------------------------------------------------------
-	
+
     echo -n "Creating basic directory layout... "
 
     # LFS 11.2 Section 4.2
@@ -333,12 +313,8 @@ function init_image {
       mkdir -p $LFS/$(readlink $LFS/dev/shm)
     fi
 
-    if [ ! -f build-state ]; then
-        touch build-state
-        chmod 777 build-state
-    fi
-    
     set +x
+
     trap - ERR
 
     echo "done."
@@ -411,11 +387,10 @@ function mount_image {
     # attach loop device
     export LOOP=$(losetup -f) # export for grub.sh
     local LOOP_P1=${LOOP}p1
-    local LOOP_P2=${LOOP}p2
 
     losetup -P $LOOP $LFS_IMG
 
-    mount $LOOP_P2 $LFS
+    mount $LOOP_P1 $LFS
 
     # mount stuff from the host onto the target disk
     mount --bind /dev $LFS/dev
@@ -443,15 +418,12 @@ function unmount_image {
         echo "$MOUNTED_LOCS" | cut -d" " -f3 | tac | xargs umount
     fi
 
-    # detach loop device
+    # detatch loop device
     local ATTACHED_LOOP=$(losetup | grep $LFS_IMG)
     if [ -n "$ATTACHED_LOOP" ]
     then
         losetup -d $(echo "$ATTACHED_LOOP" | cut -d" " -f1)
     fi
-    
-    # clean /mnt
-    rm -rf mnt
 
     set +x
 }
@@ -475,8 +447,7 @@ function build_package {
             echo "ERROR: $NAME: package not found"
             return 1
         fi
-        local TARCMD="tar -xvf $(basename ${!PKG_NAME}) -C $NAME --strip-components=1"
-        # local TARCMD="tar -xvf $(basename ${!PKG_NAME}) -C $NAME"
+        local TARCMD="tar -xf $(basename ${!PKG_NAME}) -C $NAME --strip-components=1"
     fi
 
     local BUILD_INSTR="
@@ -534,7 +505,7 @@ function build_phase {
     fi
 
     PHASE=$1
-    
+
     if [ -n "$STARTPHASE" ]
     then
         if [ $PHASE -lt $STARTPHASE ] || { $FOUNDSTARTPHASE && $ONEOFF; }
@@ -548,7 +519,7 @@ function build_phase {
 
     if [ $PHASE -ne 1 -a ! -f $LFS/root/.phase$((PHASE-1)) ]
     then
-        echo "ERROR: phases preceding phase $PHASE have not been built"
+        echo "ERROR: phases preceeding phase $PHASE have not been built"
         return 1
     fi
 
@@ -603,9 +574,7 @@ function build_phase {
     fi
 
     touch $LFS/root/.phase$PHASE
-    
-    update_state $1
-    
+
     return 0
 }
 
@@ -714,113 +683,61 @@ function install_image {
 
     # wipe beginning of device (sometimes grub-install complains about "multiple partition labels")
     dd if=/dev/zero of=$INSTALL_TGT count=2048
-
+ 
     # partition the device.
     # remove spaces and comments
     FDISK_INSTR=$(echo "$FDISK_INSTR" | sed 's/ *#.*//')
+
     if ! echo "$FDISK_INSTR" | fdisk $INSTALL_TGT |& { $VERBOSE && cat || cat > /dev/null; }
     then
-        echo "ERROR: failed to format $INSTALL_TGT. Consider manually clearing $INSTALL_TGT's partition table."
+        echo "ERROR: failed to format $INSTALL_TGT. Consider manually clearing $INSTALL_TGT's parition table."
         exit
     fi
 
     trap "echo 'install failed.' && unmount_image && exit 1" ERR
 
     mkdir -p $LFS $INSTALL_MOUNT
-	
-	#---------------------------------------------------------------------------------------------
-	# Image only have two parts, but hard dive have three parts, the additional part is for SWAP
-	#---------------------------------------------------------------------------------------------
+
     # mount IMG file
     local LOOP=$(losetup -f)
     local LOOP_P1=${LOOP}p1
-    local LOOP_P2=${LOOP}p2
     losetup -P $LOOP $LFS_IMG
 
-    # setup install partitions
+    # setup install partition
     local INSTALL_P1="${INSTALL_TGT}${PART_PREFIX}1"
-    local INSTALL_P2="${INSTALL_TGT}${PART_PREFIX}2"
-    local INSTALL_P3="${INSTALL_TGT}${PART_PREFIX}3"
-    mkfs.fat -F32 $INSTALL_P1 &> /dev/null
-    dosfslabel $INSTALL_P1 $LFSEFILABEL
-    
-    mkswap $INSTALL_P2 &> /dev/null
-    
-    mkfs -t $LFS_FS $INSTALL_P3 &> /dev/null
-    e2label $INSTALL_P3 $LFSROOTLABEL
+    mkfs -t $LFS_FS $INSTALL_P1 &> /dev/null
+    e2label $INSTALL_P1 $LFSROOTLABEL
 
-    # mount install partitions
-    mount $INSTALL_P3 $INSTALL_MOUNT
-    mount $LOOP_P2 $LFS
+    # mount install partition
+    mount $INSTALL_P1 $INSTALL_MOUNT
+    mount $LOOP_P1 $LFS
 
     $VERBOSE && echo "Copying files... " || echo -n "Copying files... "
     cp -r $LFS/* $INSTALL_MOUNT/
-    echo "1-----done."
-	
-	$VERBOSE && read -p "Press Enter to continue..."
+    echo "done."
+
+    # make sure grub.cfg is pointing at the right drive
+    # local PARTUUID=$(lsblk -o PARTUUID $INSTALL_TGT | tail -1)
+    # sed -Ei "s/root=PARTUUID=[0-9a-z-]+/root=PARTUUID=${PARTUUID}/" $INSTALL_MOUNT/boot/grub/grub.cfg
+    local UUID=$(lsblk -o UUID $INSTALL_TGT | tail -1)
+    sed -Ei "s/root=UUID=[0-9a-z-]+/root=UUID=${UUID}/" $INSTALL_MOUNT/boot/grub/grub.cfg
 
     mount --bind /dev $INSTALL_MOUNT/dev
     mount --bind /dev/pts $INSTALL_MOUNT/dev/pts
     mount -t sysfs sysfs $INSTALL_MOUNT/sys
-    mount -vt tmpfs tmpfs $INSTALL_MOUNT/run
-    mount -vt proc proc $INSTALL_MOUNT/proc
 
-	local EFI_PARTITION=$INSTALL_MOUNT/boot
-	mount $LOOP_P1 $LFS/boot/
-	cp -r $LFS/boot/* $EFI_PARTITION
-	cp bk/unicode.pf2 $EFI_PARTITION/grub
-	
-	echo "2-----done."
-	
-	$VERBOSE && read -p "Press Enter to continue..."
-	mkdir -p $INSTALL_MOUNT/boot/efi
-	local EFI_INSTALL=$INSTALL_MOUNT/boot/efi
-	echo "Mounting EFI partition to $INSTALL_MOUNT/boot/ ..."
-	mount $INSTALL_P1 $EFI_INSTALL
-	if [ $? -ne 0 ]; then
-		echo "Failed to mount EFI partition. Exiting..."
-		exit 1
-	fi
-	#--------------------------------------------------------------------------------------------------------------
-    local GRUB_CMD="grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=LFS --recheck --debug"
-    # local UPDATE_GRUB_CMD="update-grub"
-    
-    chroot $INSTALL_MOUNT /usr/bin/bash -c "mount -v -t efivarfs efivarfs /sys/firmware/efi/efivars"
-    echo "------------------"
-	chroot $INSTALL_MOUNT /usr/bin/bash -c "[ -d /sys/firmware/efi ] && echo -e "UEFI mode" || echo -e "Legacy mode""
-	echo "------------------"
-	
+    local GRUB_CMD="grub-install $INSTALL_TGT --target x86_64-efi"
+    local UPDATE_GRUB_CMD="update-grub"
+
     $VERBOSE && echo "Installing GRUB. This may take a few minutes... " || echo -n "Installing GRUB. This may take a few minutes... "
     chroot $INSTALL_MOUNT /usr/bin/bash -c "$GRUB_CMD" |& { $VERBOSE && cat || cat > /dev/null; }
-    # $VERBOSE && echo "Updating GRUB. This may take a few minutes... " || echo -n "Updating GRUB. This may take a few minutes... "
-    # chroot $INSTALL_MOUNT /usr/bin/bash -c "$UPDATE_GRUB_CMD" |& { $VERBOSE && cat || cat > /dev/null; }
-	chroot $INSTALL_MOUNT /usr/bin/bash -c "sync" |& { $VERBOSE && cat || cat > /dev/null; }
-	
-	$VERBOSE && read -p "Press Enter to continue..."
-	
-	#---------------------------------------------------------------------------------------------------
-    # make sure grub.cfg is pointing at the right drive
-    local PARTUUID=$(lsblk -o PARTUUID $INSTALL_TGT | tail -1)
-    local PART3UUID=$(lsblk -o PARTUUID $INSTALL_P3 | tail -1)
-    sed -Ei "s/root=PARTUUID=[0-9a-z-]+/root=PARTUUID=${PARTUUID}/" $INSTALL_MOUNT/boot/grub/grub.cfg
-    sed -Ei "s/--set=root/--set=root --fs-uuid ${PART3UUID}/" $INSTALL_MOUNT/boot/grub/grub.cfg
+    $VERBOSE && echo "Update GRUB. This may take a few minutes... " || echo -n "Update GRUB. This may take a few minutes... "
+    chroot $INSTALL_MOUNT /usr/bin/bash -c "$UPDATE_GRUB_CMD" |& { $VERBOSE && cat || cat > /dev/null; }
     
-	# update fstab
-	MOUNT_POINT="/boot/efi"
-	EFI_DEVICE_PARTITION="${INSTALL_TGT}${PART_PREFIX}1"
-	SWAP_DEVICE_PARTITION="${INSTALL_TGT}${PART_PREFIX}2"
-	
-	# command to add new context to the end of /etc/fstab
-	NEW_ENTRY="${EFI_DEVICE_PARTITION}\t$MOUNT_POINT\tvfat\tdefaults\t0\t1"
-	SWAP_ENTRY="${SWAP_DEVICE_PARTITION}\tnone\tswap\tsw\t0\t0"
-	echo -e "$NEW_ENTRY" | sudo tee -a $INSTALL_MOUNT/etc/fstab
-	echo -e "$SWAP_ENTRY" | sudo tee -a $INSTALL_MOUNT/etc/fstab
-	
-	# umount $EFI_PARTITION
-    echo "3-----done."
-    $VERBOSE && read -p "Press Enter to continue..."
+    echo "done."
 
     set +x
+
     trap - ERR
     unmount_image
 
@@ -850,13 +767,10 @@ function clean_image {
     # delete logs
     if [ -d $LOG_DIR ] && [ -n "$(ls $LOG_DIR)" ]
     then
-        echo "Clearing ${LOG_DIR}..."
         rm $LOG_DIR/*
     fi
-
-    # delete state file
-    rm $STATE_FILE
 }
+
 
 function main {
     # Perform single operations
@@ -920,14 +834,13 @@ function main {
     find $LFS/usr -depth -name $LFS_TGT\* | xargs rm -rf
     rm -rf $LFS/home/tester
     sed -i 's/^.*tester.*$//' $LFS/etc/{passwd,group}
-    rm -rf $LFS/sources
-    # rm -f build-state
-    
-    # unmount and detach image
+
+    # unmount and detatch image
     unmount_image
 
     echo "build successful."
 }
+
 
 # ###############
 # Parse arguments
@@ -941,6 +854,7 @@ source ./config.sh
 # import package list
 source ./packages.sh
 
+
 VERBOSE=false
 CHECKDEPS=false
 BUILDALL=false
@@ -952,8 +866,6 @@ FOUNDSTARTPHASE=false
 MOUNT=false
 UNMOUNT=false
 CLEAN=false
-
-CURRENT_PHASE=""
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -1103,6 +1015,4 @@ fi
 # ###########
 # Start build
 # ~~~~~~~~~~~
-load_state
 main
-

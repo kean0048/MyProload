@@ -451,7 +451,7 @@ function unmount_image {
     fi
     
     # clean /mnt
-    rm -rf mnt
+    # rm -rf mnt
 
     set +x
 }
@@ -793,7 +793,7 @@ function install_image {
     $VERBOSE && echo "Installing GRUB. This may take a few minutes... " || echo -n "Installing GRUB. This may take a few minutes... "
     chroot $INSTALL_MOUNT /usr/bin/bash -c "$GRUB_CMD" |& { $VERBOSE && cat || cat > /dev/null; }
     # $VERBOSE && echo "Updating GRUB. This may take a few minutes... " || echo -n "Updating GRUB. This may take a few minutes... "
-    # chroot $INSTALL_MOUNT /usr/bin/bash -c "$UPDATE_GRUB_CMD" |& { $VERBOSE && cat || cat > /dev/null; }
+    chroot $INSTALL_MOUNT /usr/bin/bash -c "efibootmgr" |& { $VERBOSE && cat || cat > /dev/null; }
 	chroot $INSTALL_MOUNT /usr/bin/bash -c "sync" |& { $VERBOSE && cat || cat > /dev/null; }
 	
 	$VERBOSE && read -p "Press Enter to continue..."
